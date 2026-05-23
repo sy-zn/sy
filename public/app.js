@@ -1,7 +1,7 @@
-﻿const CONFIG_URL_KEY = "ledger_supabase_url";
-const CONFIG_ANON_KEY = "ledger_supabase_anon_key";
 const RECEIPT_BUCKET = "receipts";
 const TEAM_RESERVE_FLOOR = 5000;
+const DEFAULT_SUPABASE_URL = "https://ilhqabnqigtmjftpywxk.supabase.co";
+const DEFAULT_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_OOJBj2Ag_h4LvKa2e03K3Q_SrcFr1jV";
 
 const state = {
   supabase: null,
@@ -91,20 +91,10 @@ function showMessage(text, isError = false) {
 }
 
 function getSupabaseConfig() {
-  const savedUrl = localStorage.getItem(CONFIG_URL_KEY);
-  const savedAnon = localStorage.getItem(CONFIG_ANON_KEY);
-
-  let url = savedUrl;
-  let anonKey = savedAnon;
-
+  const url = DEFAULT_SUPABASE_URL;
+  const anonKey = DEFAULT_SUPABASE_PUBLISHABLE_KEY;
   if (!url || !anonKey) {
-    url = window.prompt("请输入 Supabase URL（形如 https://xxxx.supabase.co）", savedUrl || "") || "";
-    anonKey = window.prompt("请输入 Supabase anon key", savedAnon || "") || "";
-    if (!url || !anonKey) {
-      return null;
-    }
-    localStorage.setItem(CONFIG_URL_KEY, url.trim());
-    localStorage.setItem(CONFIG_ANON_KEY, anonKey.trim());
+    return null;
   }
 
   return {
@@ -788,7 +778,9 @@ async function uploadReceipt(file) {
 }
 
 function renderAll() {
-  refs.userLabel.textContent = `${state.profile.display_name}${state.isAdmin ? " (admin)" : ""}`;
+  const roleText = state.isAdmin ? "admin" : "member";
+  const userText = state.profile.email || state.profile.display_name || "当前用户";
+  refs.userLabel.textContent = `${userText} (${roleText})`;
   renderSummary();
   renderAdminPanel();
   renderPeriods();
@@ -800,8 +792,29 @@ function renderAll() {
   bindReceiptLinks();
 }
 
+async function refreshCurrentRole() {
+  if (!state.user) {
+    state.isAdmin = false;
+    return;
+  }
+  const { data, error } = await state.supabase
+    .from("profiles")
+    .select("role, email, display_name")
+    .eq("id", state.user.id)
+    .single();
+  if (error) {
+    throw error;
+  }
+  state.profile = {
+    ...state.profile,
+    ...data
+  };
+  state.isAdmin = data.role === "admin";
+}
+
 async function refreshAll(successMessage) {
   await loadData();
+  await refreshCurrentRole();
   renderAll();
   if (successMessage) {
     showMessage(successMessage);
@@ -862,8 +875,9 @@ async function onRegisterSubmit(event) {
 
 async function onPeriodSubmit(event) {
   event.preventDefault();
+  await refreshCurrentRole();
   if (!state.isAdmin) {
-    showMessage("只有管理员可以新增结算周期", true);
+    showMessage(`只有管理员可以新增结算周期（当前角色：${state.profile.role || "unknown"}）`, true);
     return;
   }
 
@@ -900,6 +914,7 @@ async function onPeriodSubmit(event) {
 
 async function onMemberCreateSubmit(event) {
   event.preventDefault();
+  await refreshCurrentRole();
   if (!state.isAdmin) {
     showMessage("只有管理员可以新增成员", true);
     return;
@@ -1082,7 +1097,7 @@ async function init() {
   if (!config) {
     refs.authPanel.hidden = true;
     refs.appPanel.hidden = true;
-    showMessage("未配置 Supabase。刷新页面后输入 URL 和 anon key。", true);
+    showMessage("未配置 Supabase，请联系管理员更新默认配置。", true);
     return;
   }
 
