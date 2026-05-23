@@ -1,4 +1,4 @@
-const RECEIPT_BUCKET = "receipts";
+﻿const RECEIPT_BUCKET = "receipts";
 const TEAM_RESERVE_FLOOR = 5000;
 const DEFAULT_SUPABASE_URL = "https://ilhqabnqigtmjftpywxk.supabase.co";
 const DEFAULT_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_OOJBj2Ag_h4LvKa2e03K3Q_SrcFr1jV";
@@ -875,7 +875,12 @@ async function onRegisterSubmit(event) {
 
 async function onPeriodSubmit(event) {
   event.preventDefault();
-  await refreshCurrentRole();
+  try {
+    await refreshCurrentRole();
+  } catch (error) {
+    showMessage(`权限校验失败：${error.message || "请稍后重试"}`, true);
+    return;
+  }
   if (!state.isAdmin) {
     showMessage(`只有管理员可以新增结算周期（当前角色：${state.profile.role || "unknown"}）`, true);
     return;
@@ -914,7 +919,12 @@ async function onPeriodSubmit(event) {
 
 async function onMemberCreateSubmit(event) {
   event.preventDefault();
-  await refreshCurrentRole();
+  try {
+    await refreshCurrentRole();
+  } catch (error) {
+    showMessage(`权限校验失败：${error.message || "请稍后重试"}`, true);
+    return;
+  }
   if (!state.isAdmin) {
     showMessage("只有管理员可以新增成员", true);
     return;
@@ -1084,6 +1094,11 @@ function bindEvents() {
     refs.memberCreateForm.addEventListener("submit", onMemberCreateSubmit);
   }
 }
+
+window.addEventListener("unhandledrejection", (event) => {
+  const msg = event?.reason?.message || "页面出现未处理错误，请刷新后重试。";
+  showMessage(msg, true);
+});
 
 async function init() {
   if (!window.supabase || typeof window.supabase.createClient !== "function") {
