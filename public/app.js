@@ -272,16 +272,35 @@ async function initProfileForUser() {
     return;
   }
 
-  const baseProfile = {
-    id: user.id,
-    display_name: (user.email || "").split("@")[0] || "member",
-    role: "member",
-    email: user.email || null
-  };
+  const { data: existing, error: existingError } = await sb
+    .from("profiles")
+    .select("id")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (existingError) {
+    throw existingError;
+  }
 
-  const { error: upsertError } = await sb.from("profiles").upsert(baseProfile, { onConflict: "id" });
-  if (upsertError) {
-    throw upsertError;
+  if (!existing) {
+    const baseProfile = {
+      id: user.id,
+      display_name: (user.email || "").split("@")[0] || "member",
+      role: "member",
+      email: user.email || null
+    };
+    const { error: insertError } = await sb.from("profiles").insert(baseProfile);
+    if (insertError) {
+      throw insertError;
+    }
+  } else if (user.email) {
+    const { error: patchEmailError } = await sb
+      .from("profiles")
+      .update({ email: user.email })
+      .eq("id", user.id)
+      .is("email", null);
+    if (patchEmailError) {
+      throw patchEmailError;
+    }
   }
 
   const { data: ensuredProfile, error: ensuredError } = await sb
