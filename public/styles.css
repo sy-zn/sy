@@ -88,11 +88,24 @@ h1 {
 }
 
 .auth-panel {
-  max-width: 500px;
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 24px;
+  background:
+    linear-gradient(165deg, rgba(255, 255, 255, 0.95), rgba(242, 250, 245, 0.9)),
+    radial-gradient(circle at 92% 10%, rgba(13, 79, 132, 0.1), transparent 35%);
 }
 
 .auth-panel h2 {
   margin: 0;
+  font-size: 30px;
+  letter-spacing: 0.01em;
+}
+
+.auth-panel h3 {
+  margin: 0;
+  font-size: 20px;
+  color: #22473a;
 }
 
 .hint {
@@ -100,6 +113,24 @@ h1 {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.auth-panel form {
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid #d7e2dc;
+  border-radius: 14px;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.95), rgba(247, 252, 249, 0.95));
+}
+
+.auth-panel .btn {
+  margin-top: 4px;
+}
+
+.section-divider {
+  border: 0;
+  border-top: 1px dashed #cdd8d2;
+  margin: 18px 0;
 }
 
 .auth-state {

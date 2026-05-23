@@ -23,7 +23,7 @@
     <main class="layout">
       <section id="auth-panel" class="panel auth-panel">
         <h2>登录</h2>
-        <p class="hint">使用 Supabase Auth 邮箱账号登录。首次账号请先在 Supabase 后台创建。</p>
+        <p class="hint">使用 Supabase Auth 邮箱账号登录。没有账号可先自助注册，注册后由管理员绑定成员。</p>
         <form id="login-form" class="form-grid">
           <label>
             邮箱
@@ -34,6 +34,23 @@
             <input type="password" name="password" required placeholder="请输入密码" />
           </label>
           <button class="btn primary" type="submit">登录</button>
+        </form>
+        <hr class="section-divider" />
+        <h3>注册账号</h3>
+        <form id="register-form" class="form-grid">
+          <label>
+            邮箱
+            <input type="email" name="email" required placeholder="new-user@example.com" />
+          </label>
+          <label>
+            密码
+            <input type="password" name="password" required minlength="6" placeholder="至少 6 位" />
+          </label>
+          <label>
+            确认密码
+            <input type="password" name="confirm_password" required minlength="6" placeholder="再次输入密码" />
+          </label>
+          <button class="btn ghost" type="submit">注册</button>
         </form>
       </section>
 

@@ -26,6 +26,7 @@ const refs = {
   adminPanel: document.getElementById("admin-panel"),
   message: document.getElementById("message"),
   loginForm: document.getElementById("login-form"),
+  registerForm: document.getElementById("register-form"),
   logoutBtn: document.getElementById("logout-btn"),
   userLabel: document.getElementById("user-label"),
   summaryCards: document.getElementById("summary-cards"),
@@ -805,6 +806,41 @@ async function onLoginSubmit(event) {
   }
 }
 
+async function onRegisterSubmit(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(refs.registerForm).entries());
+  const email = String(payload.email || "").trim();
+  const password = String(payload.password || "");
+  const confirmPassword = String(payload.confirm_password || "");
+
+  if (!email) {
+    showMessage("请输入邮箱", true);
+    return;
+  }
+  if (password.length < 6) {
+    showMessage("密码至少 6 位", true);
+    return;
+  }
+  if (password !== confirmPassword) {
+    showMessage("两次输入的密码不一致", true);
+    return;
+  }
+
+  try {
+    const { error } = await state.supabase.auth.signUp({
+      email,
+      password
+    });
+    if (error) {
+      throw error;
+    }
+    refs.registerForm.reset();
+    showMessage("注册成功。请先登录，随后由管理员绑定到对应成员。");
+  } catch (error) {
+    showMessage(error.message || "注册失败", true);
+  }
+}
+
 async function onPeriodSubmit(event) {
   event.preventDefault();
   if (!state.isAdmin) {
@@ -1003,6 +1039,9 @@ async function handleSession(session) {
 
 function bindEvents() {
   refs.loginForm.addEventListener("submit", onLoginSubmit);
+  if (refs.registerForm) {
+    refs.registerForm.addEventListener("submit", onRegisterSubmit);
+  }
   refs.logoutBtn.addEventListener("click", onLogout);
   refs.periodForm.addEventListener("submit", onPeriodSubmit);
   refs.capitalForm.addEventListener("submit", onCapitalSubmit);
