@@ -11,7 +11,9 @@ const state = {
   selectedPeriodId: null,
   data: {
     profiles: [],
-    shares: [],
+    members: [],
+    memberHashrates: [],
+    accountBindings: [],
     periods: [],
     capitalEntries: [],
     expenses: []
@@ -21,6 +23,7 @@ const state = {
 const refs = {
   authPanel: document.getElementById("auth-panel"),
   appPanel: document.getElementById("app-panel"),
+  adminPanel: document.getElementById("admin-panel"),
   message: document.getElementById("message"),
   loginForm: document.getElementById("login-form"),
   logoutBtn: document.getElementById("logout-btn"),
@@ -33,7 +36,12 @@ const refs = {
   capitalRows: document.getElementById("capital-rows"),
   expenseForm: document.getElementById("expense-form"),
   expenseRows: document.getElementById("expense-rows"),
-  settlementRows: document.getElementById("settlement-rows")
+  settlementRows: document.getElementById("settlement-rows"),
+  memberCreateForm: document.getElementById("member-create-form"),
+  adminMemberRows: document.getElementById("admin-member-rows"),
+  accountBindingRows: document.getElementById("account-binding-rows"),
+  capitalMemberSelect: document.getElementById("capital-member-select"),
+  expenseMemberSelect: document.getElementById("expense-member-select")
 };
 
 function safe(value) {
@@ -78,7 +86,7 @@ function showMessage(text, isError = false) {
   showMessage.timer = setTimeout(() => {
     refs.message.hidden = true;
     refs.message.textContent = "";
-  }, 3600);
+  }, 3800);
 }
 
 function getSupabaseConfig() {
@@ -104,46 +112,72 @@ function getSupabaseConfig() {
   };
 }
 
-function mergeMembers(profiles, shares) {
-  const byUser = new Map();
-  shares.forEach((share) => {
-    byUser.set(share.user_id, {
-      user_id: share.user_id,
-      hashrate_ths: toNumber(share.hashrate_ths),
-      is_active: Boolean(share.is_active)
-    });
-  });
-
-  return profiles.map((profile) => {
-    const share = byUser.get(profile.id);
-    return {
-      user_id: profile.id,
-      display_name: profile.display_name || profile.email || profile.id,
-      role: profile.role,
-      hashrate_ths: share ? share.hashrate_ths : 0,
-      is_active: share ? share.is_active : true
-    };
-  });
-}
-
 function getCurrentPeriod() {
   return state.data.periods.find((item) => item.id === state.selectedPeriodId) || null;
 }
 
-function getMembers() {
-  const members = mergeMembers(state.data.profiles, state.data.shares).filter((item) => item.is_active);
-  members.sort((a, b) => a.display_name.localeCompare(b.display_name, "zh-Hans-CN"));
-  return members;
+function memberById(memberId) {
+  return state.data.members.find((item) => item.id === memberId) || null;
 }
 
-function getShareMap(members) {
-  const totalHashrate = members.reduce((sum, item) => sum + toNumber(item.hashrate_ths), 0);
+function memberName(memberId) {
+  const member = memberById(memberId);
+  return member ? member.member_name : "未绑定成员";
+}
+
+function profileLabel(profile) {
+  if (!profile) {
+    return "-";
+  }
+  if (profile.email) {
+    return profile.email;
+  }
+  return profile.display_name || profile.id;
+}
+
+function getHashrateMap() {
   const map = new Map();
-  members.forEach((item) => {
-    const ratio = totalHashrate > 0 ? toNumber(item.hashrate_ths) / totalHashrate : 0;
-    map.set(item.user_id, ratio);
+  state.data.memberHashrates.forEach((row) => {
+    map.set(row.member_id, toNumber(row.hashrate_ths));
   });
-  return { totalHashrate, map };
+  return map;
+}
+
+function getActiveMembers() {
+  return state.data.members.filter((item) => item.is_active).sort((a, b) => a.member_name.localeCompare(b.member_name, "zh-Hans-CN"));
+}
+
+function getBindingMap() {
+  const map = new Map();
+  state.data.accountBindings
+    .filter((row) => row.is_active)
+    .forEach((row) => {
+      if (!map.has(row.profile_id)) {
+        map.set(row.profile_id, row.member_id);
+      }
+    });
+  return map;
+}
+
+function getAccessibleMembersForCurrentUser() {
+  const activeMembers = getActiveMembers();
+  if (state.isAdmin) {
+    return activeMembers;
+  }
+
+  const memberId = getBindingMap().get(state.user.id);
+  if (!memberId) {
+    return [];
+  }
+  return activeMembers.filter((item) => item.id === memberId);
+}
+
+function canUseMember(memberId) {
+  if (state.isAdmin) {
+    return true;
+  }
+  const own = getBindingMap().get(state.user.id);
+  return own === memberId;
 }
 
 function inPeriod(day, period) {
@@ -162,35 +196,48 @@ function computePoolBalance() {
   return totalCapital - poolPaid;
 }
 
+function getShareMap() {
+  const members = getActiveMembers();
+  const hashrateMap = getHashrateMap();
+  const totalHashrate = members.reduce((sum, m) => sum + (hashrateMap.get(m.id) || 0), 0);
+  const map = new Map();
+
+  members.forEach((member) => {
+    const hashrate = hashrateMap.get(member.id) || 0;
+    map.set(member.id, totalHashrate > 0 ? hashrate / totalHashrate : 0);
+  });
+
+  return { members, hashrateMap, totalHashrate, shareMap: map };
+}
+
 function computeSettlement(period) {
-  const members = getMembers();
-  const { totalHashrate, map } = getShareMap(members);
+  const { members, shareMap, totalHashrate } = getShareMap();
 
   if (!period) {
     return {
       rows: [],
       totals: {
         commonExpense: 0,
-        personalPaid: 0,
         totalHashrate,
-        totalCapital: state.data.capitalEntries.reduce((sum, row) => sum + toNumber(row.amount), 0)
+        totalCapital: 0
       }
     };
   }
 
   const scopedExpenses = state.data.expenses.filter((row) => inPeriod(row.expense_date, period));
   const scopedCapital = state.data.capitalEntries.filter((row) => inPeriod(row.entry_date, period));
-
   const commonExpense = scopedExpenses.reduce((sum, row) => sum + toNumber(row.amount), 0);
 
   const rows = members.map((member) => {
-    const shareRatio = map.get(member.user_id) || 0;
+    const memberId = member.id;
+    const shareRatio = shareMap.get(memberId) || 0;
+
     const personalPaid = scopedExpenses
-      .filter((row) => row.payer_id === member.user_id && row.payment_source === "personal")
+      .filter((row) => row.member_id === memberId && row.payment_source === "personal")
       .reduce((sum, row) => sum + toNumber(row.amount), 0);
 
     const capitalInPeriod = scopedCapital
-      .filter((row) => row.owner_id === member.user_id)
+      .filter((row) => row.member_id === memberId)
       .reduce((sum, row) => sum + toNumber(row.amount), 0);
 
     const allocatedCost = commonExpense * shareRatio;
@@ -198,8 +245,8 @@ function computeSettlement(period) {
     const net = contributed - allocatedCost;
 
     return {
-      user_id: member.user_id,
-      display_name: member.display_name,
+      member_id: memberId,
+      member_name: member.member_name,
       shareRatio,
       allocatedCost,
       contributed,
@@ -211,9 +258,6 @@ function computeSettlement(period) {
     rows,
     totals: {
       commonExpense,
-      personalPaid: scopedExpenses
-        .filter((row) => row.payment_source === "personal")
-        .reduce((sum, row) => sum + toNumber(row.amount), 0),
       totalHashrate,
       totalCapital: scopedCapital.reduce((sum, row) => sum + toNumber(row.amount), 0)
     }
@@ -227,31 +271,21 @@ async function initProfileForUser() {
     return;
   }
 
-  const { data: profile, error } = await sb
-    .from("profiles")
-    .select("id, display_name, role")
-    .eq("id", user.id)
-    .maybeSingle();
+  const baseProfile = {
+    id: user.id,
+    display_name: (user.email || "").split("@")[0] || "member",
+    role: "member",
+    email: user.email || null
+  };
 
-  if (error) {
-    throw error;
-  }
-
-  if (!profile) {
-    const emailName = (user.email || "").split("@")[0] || "member";
-    const { error: insertError } = await sb.from("profiles").insert({
-      id: user.id,
-      display_name: emailName,
-      role: "member"
-    });
-    if (insertError) {
-      throw insertError;
-    }
+  const { error: upsertError } = await sb.from("profiles").upsert(baseProfile, { onConflict: "id" });
+  if (upsertError) {
+    throw upsertError;
   }
 
   const { data: ensuredProfile, error: ensuredError } = await sb
     .from("profiles")
-    .select("id, display_name, role")
+    .select("id, display_name, role, email")
     .eq("id", user.id)
     .single();
 
@@ -266,32 +300,36 @@ async function initProfileForUser() {
 async function loadData() {
   const sb = state.supabase;
 
-  const [profilesRes, sharesRes, periodsRes, capitalRes, expenseRes] = await Promise.all([
-    sb.from("profiles").select("id, display_name, role").order("created_at", { ascending: true }),
-    sb.from("member_shares").select("user_id, hashrate_ths, is_active"),
+  const [profilesRes, membersRes, hashratesRes, bindingsRes, periodsRes, capitalRes, expenseRes] = await Promise.all([
+    sb.from("profiles").select("id, display_name, role, email").order("created_at", { ascending: true }),
+    sb.from("members").select("id, member_name, note, is_active").order("member_name", { ascending: true }),
+    sb.from("member_hashrates").select("member_id, hashrate_ths"),
+    sb.from("account_member_bindings").select("id, profile_id, member_id, is_active"),
     sb.from("settlement_periods").select("id, title, start_date, end_date, status").order("start_date", { ascending: false }),
     sb
       .from("capital_entries")
-      .select("id, owner_id, amount, entry_date, description, receipt_path, created_at")
+      .select("id, owner_id, member_id, amount, entry_date, description, receipt_path, created_at")
       .order("entry_date", { ascending: false })
       .order("created_at", { ascending: false })
-      .limit(200),
+      .limit(300),
     sb
       .from("expenses")
-      .select("id, payer_id, amount, expense_date, category, payment_source, description, receipt_path, created_at")
+      .select("id, payer_id, member_id, amount, expense_date, category, payment_source, description, receipt_path, created_at")
       .order("expense_date", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(300)
   ]);
 
-  for (const res of [profilesRes, sharesRes, periodsRes, capitalRes, expenseRes]) {
+  for (const res of [profilesRes, membersRes, hashratesRes, bindingsRes, periodsRes, capitalRes, expenseRes]) {
     if (res.error) {
       throw res.error;
     }
   }
 
   state.data.profiles = profilesRes.data || [];
-  state.data.shares = sharesRes.data || [];
+  state.data.members = membersRes.data || [];
+  state.data.memberHashrates = hashratesRes.data || [];
+  state.data.accountBindings = bindingsRes.data || [];
   state.data.periods = periodsRes.data || [];
   state.data.capitalEntries = capitalRes.data || [];
   state.data.expenses = expenseRes.data || [];
@@ -307,15 +345,11 @@ async function loadData() {
   }
 }
 
-function ownerNameById(userId) {
-  const profile = state.data.profiles.find((item) => item.id === userId);
-  return profile ? profile.display_name : userId;
-}
-
 function renderSummary() {
   const period = getCurrentPeriod();
   const settlement = computeSettlement(period);
   const poolBalance = computePoolBalance();
+  const accountMember = memberName(getBindingMap().get(state.user.id));
 
   const cards = [
     {
@@ -324,19 +358,19 @@ function renderSummary() {
       helper: poolBalance < TEAM_RESERVE_FLOOR ? `低于安全线 ${TEAM_RESERVE_FLOOR}` : `安全线 ${TEAM_RESERVE_FLOOR}`
     },
     {
-      label: "当前结算周期",
-      value: period ? safe(period.title) : "未选择",
-      helper: period ? `${period.start_date} ~ ${period.end_date}` : "先创建一个周期"
+      label: "我的归属成员",
+      value: state.isAdmin ? "管理员" : safe(accountMember),
+      helper: state.isAdmin ? "可管理全部成员与账号绑定" : "由管理员绑定"
     },
     {
       label: "本期公共总支出",
       value: formatMoney(settlement.totals.commonExpense),
-      helper: "按机器总算力占比分摊"
+      helper: "按成员机器总算力占比分摊"
     },
     {
-      label: "本期入金净额",
-      value: formatMoney(settlement.totals.totalCapital),
-      helper: "入金为正，提回为负"
+      label: "当前结算周期",
+      value: period ? safe(period.title) : "未选择",
+      helper: period ? `${period.start_date} ~ ${period.end_date}` : "先创建一个周期"
     }
   ];
 
@@ -354,8 +388,7 @@ function renderSummary() {
 }
 
 function renderPeriods() {
-  const rows = state.data.periods;
-  refs.periodRows.innerHTML = rows
+  refs.periodRows.innerHTML = state.data.periods
     .map((period) => {
       const selected = period.id === state.selectedPeriodId;
       const lockButton =
@@ -409,25 +442,25 @@ function renderPeriods() {
 }
 
 function renderMembers() {
-  const members = getMembers();
-  const { totalHashrate } = getShareMap(members);
+  const { members, hashrateMap, totalHashrate } = getShareMap();
 
   refs.memberRows.innerHTML = members
     .map((member) => {
-      const ratio = totalHashrate > 0 ? member.hashrate_ths / totalHashrate : 0;
+      const hashrate = hashrateMap.get(member.id) || 0;
+      const ratio = totalHashrate > 0 ? hashrate / totalHashrate : 0;
       const action = state.isAdmin
         ? `
           <div class="action-row">
-            <input class="share-input" data-id="${member.user_id}" type="number" step="0.01" value="${member.hashrate_ths}" style="max-width:120px;" />
-            <button class="btn mini ghost member-save" data-id="${member.user_id}">保存</button>
+            <input class="share-input" data-id="${member.id}" type="number" step="0.01" value="${hashrate}" style="max-width:120px;" />
+            <button class="btn mini ghost member-save" data-id="${member.id}">保存</button>
           </div>
         `
         : "-";
 
       return `
         <tr>
-          <td>${safe(member.display_name)}${member.role === "admin" ? " (admin)" : ""}</td>
-          <td>${formatMoney(member.hashrate_ths)}</td>
+          <td>${safe(member.member_name)}</td>
+          <td>${formatMoney(hashrate)}</td>
           <td>${formatPercent(ratio)}</td>
           <td>${action}</td>
         </tr>
@@ -445,20 +478,17 @@ function renderMembers() {
       }
 
       try {
-        const { error } = await state.supabase.from("member_shares").upsert(
+        const { error } = await state.supabase.from("member_hashrates").upsert(
           {
-            user_id: button.dataset.id,
+            member_id: button.dataset.id,
             hashrate_ths: hashrate,
-            is_active: true,
             updated_at: new Date().toISOString()
           },
-          { onConflict: "user_id" }
+          { onConflict: "member_id" }
         );
-
         if (error) {
           throw error;
         }
-
         await refreshAll("成员算力已更新。");
       } catch (error) {
         showMessage(error.message || "更新算力失败", true);
@@ -467,28 +497,128 @@ function renderMembers() {
   });
 }
 
-function canEditRow(ownerId) {
+function renderAdminPanel() {
+  refs.adminPanel.hidden = !state.isAdmin;
+  if (!state.isAdmin) {
+    return;
+  }
+
+  const activeLabel = (flag) => (flag ? "启用" : "停用");
+
+  refs.adminMemberRows.innerHTML = state.data.members
+    .map(
+      (member) => `
+      <tr>
+        <td>${safe(member.member_name)}</td>
+        <td>${safe(activeLabel(member.is_active))}</td>
+        <td>${safe(member.note || "-")}</td>
+      </tr>
+    `
+    )
+    .join("");
+
+  const memberOptions = ['<option value="">未绑定</option>']
+    .concat(state.data.members.map((m) => `<option value="${m.id}">${safe(m.member_name)}</option>`))
+    .join("");
+
+  const currentBindingMap = getBindingMap();
+
+  refs.accountBindingRows.innerHTML = state.data.profiles
+    .map((profile) => {
+      const boundMemberId = currentBindingMap.get(profile.id) || "";
+      return `
+      <tr>
+        <td>${safe(profileLabel(profile))}</td>
+        <td>
+          <select class="binding-select" data-profile-id="${profile.id}">
+            ${memberOptions}
+          </select>
+        </td>
+        <td><button class="btn mini ghost binding-save" data-profile-id="${profile.id}">保存</button></td>
+      </tr>
+    `;
+    })
+    .join("");
+
+  refs.accountBindingRows.querySelectorAll(".binding-select").forEach((select) => {
+    const profileId = select.dataset.profileId;
+    select.value = currentBindingMap.get(profileId) || "";
+  });
+
+  refs.accountBindingRows.querySelectorAll(".binding-save").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const profileId = button.dataset.profileId;
+      const select = refs.accountBindingRows.querySelector(`.binding-select[data-profile-id="${profileId}"]`);
+      const memberId = select ? select.value : "";
+
+      try {
+        if (!memberId) {
+          const { error } = await state.supabase.from("account_member_bindings").delete().eq("profile_id", profileId);
+          if (error) {
+            throw error;
+          }
+          await refreshAll("账号绑定已清除。");
+          return;
+        }
+
+        const { error } = await state.supabase.from("account_member_bindings").upsert(
+          {
+            profile_id: profileId,
+            member_id: memberId,
+            is_active: true,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: "profile_id" }
+        );
+
+        if (error) {
+          throw error;
+        }
+
+        await refreshAll("账号绑定已更新。");
+      } catch (error) {
+        showMessage(error.message || "绑定失败", true);
+      }
+    });
+  });
+}
+
+function renderMemberSelects() {
+  const members = getAccessibleMembersForCurrentUser();
+
+  const options = members.map((member) => `<option value="${member.id}">${safe(member.member_name)}</option>`).join("");
+
+  refs.capitalMemberSelect.innerHTML = options || '<option value="">无可用成员</option>';
+  refs.expenseMemberSelect.innerHTML = options || '<option value="">无可用成员</option>';
+
+  refs.capitalMemberSelect.disabled = members.length === 0;
+  refs.expenseMemberSelect.disabled = members.length === 0;
+}
+
+function canEditCapitalRow(ownerId) {
   return ownerId === state.user.id;
+}
+
+function canEditExpenseRow(payerId) {
+  return payerId === state.user.id;
 }
 
 function renderCapitalRows() {
   refs.capitalRows.innerHTML = state.data.capitalEntries
     .map((row) => {
-      const isOwner = canEditRow(row.owner_id);
-      const ownerName = ownerNameById(row.owner_id);
       const amount = toNumber(row.amount);
       const cls = amount >= 0 ? "money-plus" : "money-minus";
       const receipt = row.receipt_path
         ? `<a href="#" class="link-btn receipt-open" data-path="${safe(row.receipt_path)}">查看</a>`
         : "-";
-      const actions = isOwner
+      const actions = canEditCapitalRow(row.owner_id)
         ? `<button class="btn mini danger capital-del" data-id="${row.id}">删除</button>`
         : "-";
 
       return `
         <tr>
           <td>${safe(dateOnly(row.entry_date))}</td>
-          <td>${safe(ownerName)}</td>
+          <td>${safe(memberName(row.member_id))}</td>
           <td class="${cls}">${formatMoney(amount)}</td>
           <td>${safe(row.description || "-")}</td>
           <td>${receipt}</td>
@@ -520,19 +650,17 @@ function renderCapitalRows() {
 function renderExpenseRows() {
   refs.expenseRows.innerHTML = state.data.expenses
     .map((row) => {
-      const isOwner = canEditRow(row.payer_id);
-      const payerName = ownerNameById(row.payer_id);
       const receipt = row.receipt_path
         ? `<a href="#" class="link-btn receipt-open" data-path="${safe(row.receipt_path)}">查看</a>`
         : "-";
-      const actions = isOwner
+      const actions = canEditExpenseRow(row.payer_id)
         ? `<button class="btn mini danger expense-del" data-id="${row.id}">删除</button>`
         : "-";
 
       return `
         <tr>
           <td>${safe(dateOnly(row.expense_date))}</td>
-          <td>${safe(payerName)}</td>
+          <td>${safe(memberName(row.member_id))}</td>
           <td>${formatMoney(row.amount)}</td>
           <td>${safe(row.payment_source)}</td>
           <td>${safe(row.category)}</td>
@@ -565,21 +693,19 @@ function renderExpenseRows() {
 
 function renderSettlement() {
   const period = getCurrentPeriod();
-  const members = getMembers();
-  const { map } = getShareMap(members);
   const settlement = computeSettlement(period);
-
+  const { shareMap } = getShareMap();
   const poolBalance = computePoolBalance();
 
   refs.settlementRows.innerHTML = settlement.rows
     .map((row) => {
-      const targetReserve = TEAM_RESERVE_FLOOR * (map.get(row.user_id) || 0);
+      const targetReserve = TEAM_RESERVE_FLOOR * (shareMap.get(row.member_id) || 0);
       const shouldTopUp = Math.max(0, targetReserve - Math.max(0, row.net));
       const netClass = row.net >= 0 ? "money-plus" : "money-minus";
 
       return `
         <tr>
-          <td>${safe(row.display_name)}</td>
+          <td>${safe(row.member_name)}</td>
           <td>${formatPercent(row.shareRatio)}</td>
           <td>${formatMoney(row.allocatedCost)}</td>
           <td>${formatMoney(row.contributed)}</td>
@@ -592,7 +718,7 @@ function renderSettlement() {
     .join("");
 
   if (settlement.rows.length === 0) {
-    refs.settlementRows.innerHTML = `<tr><td colspan="7">请先创建成员和结算周期。</td></tr>`;
+    refs.settlementRows.innerHTML = `<tr><td colspan="7">请先添加成员，并创建结算周期。</td></tr>`;
   }
 
   if (poolBalance < TEAM_RESERVE_FLOOR) {
@@ -644,8 +770,10 @@ async function uploadReceipt(file) {
 function renderAll() {
   refs.userLabel.textContent = `${state.profile.display_name}${state.isAdmin ? " (admin)" : ""}`;
   renderSummary();
+  renderAdminPanel();
   renderPeriods();
   renderMembers();
+  renderMemberSelects();
   renderCapitalRows();
   renderExpenseRows();
   renderSettlement();
@@ -715,6 +843,39 @@ async function onPeriodSubmit(event) {
   }
 }
 
+async function onMemberCreateSubmit(event) {
+  event.preventDefault();
+  if (!state.isAdmin) {
+    showMessage("只有管理员可以新增成员", true);
+    return;
+  }
+
+  const payload = Object.fromEntries(new FormData(refs.memberCreateForm).entries());
+  const memberName = String(payload.member_name || "").trim();
+  if (!memberName) {
+    showMessage("成员名称不能为空", true);
+    return;
+  }
+
+  try {
+    const { error } = await state.supabase.from("members").insert({
+      member_name: memberName,
+      note: String(payload.note || "").trim(),
+      is_active: true,
+      created_by: state.user.id
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    refs.memberCreateForm.reset();
+    await refreshAll("成员已新增。");
+  } catch (error) {
+    showMessage(error.message || "新增成员失败", true);
+  }
+}
+
 async function onCapitalSubmit(event) {
   event.preventDefault();
   const form = refs.capitalForm;
@@ -727,12 +888,21 @@ async function onCapitalSubmit(event) {
       showMessage("金额不能为0", true);
       return;
     }
+    if (!payload.member_id) {
+      showMessage("请先选择归属成员", true);
+      return;
+    }
+    if (!canUseMember(payload.member_id)) {
+      showMessage("当前账号无权录入该成员数据", true);
+      return;
+    }
 
     const receiptFile = form.querySelector('input[name="receipt"]').files[0];
     const receiptPath = await uploadReceipt(receiptFile);
 
     const { error } = await state.supabase.from("capital_entries").insert({
       owner_id: state.user.id,
+      member_id: payload.member_id,
       amount,
       entry_date: payload.entry_date,
       description: String(payload.description || "").trim(),
@@ -744,6 +914,7 @@ async function onCapitalSubmit(event) {
     }
 
     form.reset();
+    renderMemberSelects();
     await refreshAll("入金/提回记录已提交。");
   } catch (error) {
     showMessage(error.message || "提交失败", true);
@@ -762,12 +933,21 @@ async function onExpenseSubmit(event) {
       showMessage("支出金额必须大于0", true);
       return;
     }
+    if (!payload.member_id) {
+      showMessage("请先选择归属成员", true);
+      return;
+    }
+    if (!canUseMember(payload.member_id)) {
+      showMessage("当前账号无权录入该成员数据", true);
+      return;
+    }
 
     const receiptFile = form.querySelector('input[name="receipt"]').files[0];
     const receiptPath = await uploadReceipt(receiptFile);
 
     const { error } = await state.supabase.from("expenses").insert({
       payer_id: state.user.id,
+      member_id: payload.member_id,
       amount,
       expense_date: payload.expense_date,
       category: payload.category,
@@ -781,6 +961,7 @@ async function onExpenseSubmit(event) {
     }
 
     form.reset();
+    renderMemberSelects();
     await refreshAll("支出记录已提交。");
   } catch (error) {
     showMessage(error.message || "提交失败", true);
@@ -805,13 +986,6 @@ async function handleSession(session) {
     state.user = null;
     state.profile = null;
     state.isAdmin = false;
-    state.data = {
-      profiles: [],
-      shares: [],
-      periods: [],
-      capitalEntries: [],
-      expenses: []
-    };
     setAuthedUI(false);
     return;
   }
@@ -833,6 +1007,9 @@ function bindEvents() {
   refs.periodForm.addEventListener("submit", onPeriodSubmit);
   refs.capitalForm.addEventListener("submit", onCapitalSubmit);
   refs.expenseForm.addEventListener("submit", onExpenseSubmit);
+  if (refs.memberCreateForm) {
+    refs.memberCreateForm.addEventListener("submit", onMemberCreateSubmit);
+  }
 }
 
 async function init() {
