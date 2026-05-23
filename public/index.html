@@ -1,0 +1,234 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>矿场合伙账本</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-bg"></div>
+
+    <header class="topbar">
+      <div>
+        <p class="kicker">Shared Ledger</p>
+        <h1>矿场合伙账本</h1>
+      </div>
+      <div id="auth-state" class="auth-state">
+        <span id="user-label">未登录</span>
+        <button id="logout-btn" class="btn ghost" hidden>退出登录</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section id="auth-panel" class="panel auth-panel">
+        <h2>登录</h2>
+        <p class="hint">使用 Supabase Auth 邮箱账号登录。首次账号请先在 Supabase 后台创建。</p>
+        <form id="login-form" class="form-grid">
+          <label>
+            邮箱
+            <input type="email" name="email" required placeholder="partner@example.com" />
+          </label>
+          <label>
+            密码
+            <input type="password" name="password" required placeholder="请输入密码" />
+          </label>
+          <button class="btn primary" type="submit">登录</button>
+        </form>
+      </section>
+
+      <section id="app-panel" class="panel" hidden>
+        <div id="message" class="message" hidden></div>
+
+        <div class="summary-cards" id="summary-cards"></div>
+
+        <div class="split two">
+          <article class="subpanel">
+            <div class="subpanel-head">
+              <h3>结算周期</h3>
+              <p>可按几天或一个月灵活结算</p>
+            </div>
+            <form id="period-form" class="form-grid inline-form">
+              <label>
+                标题
+                <input type="text" name="title" required placeholder="例如：2026-05-上旬" />
+              </label>
+              <label>
+                开始
+                <input type="date" name="start_date" required />
+              </label>
+              <label>
+                结束
+                <input type="date" name="end_date" required />
+              </label>
+              <button class="btn primary" type="submit">新增周期</button>
+            </form>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>周期</th>
+                    <th>时间</th>
+                    <th>状态</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="period-rows"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="subpanel">
+            <div class="subpanel-head">
+              <h3>成员算力占比</h3>
+              <p>分摊比例 = 个人机器总算力 / 全体机器总算力</p>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>成员</th>
+                    <th>机器总算力(TH/s)</th>
+                    <th>占比</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="member-rows"></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+
+        <div class="split two">
+          <article class="subpanel">
+            <div class="subpanel-head">
+              <h3>入金/提回记录</h3>
+              <p>正数=入金，负数=提回（仅可录入自己的）</p>
+            </div>
+            <form id="capital-form" class="form-grid inline-form">
+              <label>
+                日期
+                <input type="date" name="entry_date" required />
+              </label>
+              <label>
+                金额
+                <input type="number" name="amount" step="0.01" required placeholder="正数入金，负数提回" />
+              </label>
+              <label>
+                说明
+                <input type="text" name="description" placeholder="例如：补充备用金" />
+              </label>
+              <label>
+                凭证
+                <input type="file" name="receipt" accept="image/*,application/pdf" />
+              </label>
+              <button class="btn primary" type="submit">提交记录</button>
+            </form>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>日期</th>
+                    <th>成员</th>
+                    <th>金额</th>
+                    <th>说明</th>
+                    <th>凭证</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="capital-rows"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="subpanel">
+            <div class="subpanel-head">
+              <h3>支出记录</h3>
+              <p>公共支出默认按算力占比分摊（仅可录入自己的）</p>
+            </div>
+            <form id="expense-form" class="form-grid inline-form">
+              <label>
+                日期
+                <input type="date" name="expense_date" required />
+              </label>
+              <label>
+                金额
+                <input type="number" name="amount" step="0.01" required />
+              </label>
+              <label>
+                类别
+                <select name="category" required>
+                  <option value="electricity">电费</option>
+                  <option value="salary">员工工资</option>
+                  <option value="maintenance">维修</option>
+                  <option value="hospitality">宴请/招待</option>
+                  <option value="travel">现场出行</option>
+                  <option value="other">其他</option>
+                </select>
+              </label>
+              <label>
+                付款来源
+                <select name="payment_source" required>
+                  <option value="pool">备用金池</option>
+                  <option value="personal">个人垫付</option>
+                </select>
+              </label>
+              <label>
+                说明
+                <input type="text" name="description" placeholder="用途、对象、结果简述" />
+              </label>
+              <label>
+                凭证
+                <input type="file" name="receipt" accept="image/*,application/pdf" />
+              </label>
+              <button class="btn primary" type="submit">提交支出</button>
+            </form>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>日期</th>
+                    <th>成员</th>
+                    <th>金额</th>
+                    <th>来源</th>
+                    <th>类别</th>
+                    <th>说明</th>
+                    <th>凭证</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="expense-rows"></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+
+        <article class="subpanel">
+          <div class="subpanel-head">
+            <h3>结算明细</h3>
+            <p>选中一个周期后自动计算：应承担、已贡献、应补/可结转</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>成员</th>
+                  <th>占比</th>
+                  <th>应承担费用</th>
+                  <th>已贡献(入金+个人垫付)</th>
+                  <th>净额</th>
+                  <th>个人目标备用金</th>
+                  <th>建议补款</th>
+                </tr>
+              </thead>
+              <tbody id="settlement-rows"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>
