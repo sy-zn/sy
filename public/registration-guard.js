@@ -1,4 +1,25 @@
 (function () {
+  const T = {
+    init: "\u7cfb\u7edf\u8fd8\u5728\u521d\u59cb\u5316\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5\u3002",
+    email: "\u8bf7\u8f93\u5165\u90ae\u7bb1",
+    password: "\u5bc6\u7801\u81f3\u5c11 6 \u4f4d",
+    confirm: "\u4e24\u6b21\u8f93\u5165\u7684\u5bc6\u7801\u4e0d\u4e00\u81f4",
+    checkFail: "\u6ce8\u518c\u6821\u9a8c\u5931\u8d25",
+    notAllowed: "\u8be5\u90ae\u7bb1\u6682\u672a\u83b7\u5f97\u7ba1\u7406\u5458\u540c\u610f\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u540c\u610f\u540e\u518d\u6ce8\u518c\u3002",
+    signupFail: "\u6ce8\u518c\u5931\u8d25",
+    signupOk: "\u6ce8\u518c\u6210\u529f\u3002\u8bf7\u767b\u5f55\uff1b\u767b\u5f55\u540e\u4ecd\u9700\u7ba1\u7406\u5458\u7ed1\u5b9a\u6210\u5458\uff0c\u624d\u80fd\u8fdb\u5165\u8d26\u672c\u3002",
+    onlyAdmin: "\u53ea\u6709\u7ba1\u7406\u5458\u53ef\u4ee5\u540c\u610f\u6ce8\u518c\u90ae\u7bb1",
+    addFail: "\u6dfb\u52a0\u5931\u8d25",
+    addOk: "\u5df2\u540c\u610f\u8be5\u90ae\u7bb1\u6ce8\u518c\u3002",
+    used: "\u5df2\u6ce8\u518c",
+    pending: "\u5df2\u540c\u610f\uff0c\u7b49\u5f85\u6ce8\u518c",
+    empty: "\u8fd8\u6ca1\u6709\u6dfb\u52a0\u5141\u8bb8\u6ce8\u518c\u7684\u90ae\u7bb1\u3002"
+  };
+
+  const style = document.createElement("style");
+  style.textContent = ".form-status{margin:0;border-radius:10px;padding:9px 10px;background:#eef8f2;color:#186d47;font-size:13px}.form-status.error{background:#fff1f1;color:#a32626}.invite-wrap{margin-bottom:12px}";
+  document.head.appendChild(style);
+
   function status(text, isError) {
     const el = document.getElementById("register-status");
     if (!el) return;
@@ -28,13 +49,13 @@
     rows.innerHTML = (data || [])
       .map((item) => {
         const usedAt = item.used_at ? String(item.used_at).slice(0, 10) : "-";
-        const text = item.used_at ? "已注册" : "已同意，等待注册";
+        const text = item.used_at ? T.used : T.pending;
         return `<tr><td>${item.email}</td><td>${text}</td><td>${usedAt}</td></tr>`;
       })
       .join("");
 
     if (!rows.innerHTML) {
-      rows.innerHTML = '<tr><td colspan="3">还没有添加允许注册的邮箱。</td></tr>';
+      rows.innerHTML = `<tr><td colspan="3">${T.empty}</td></tr>`;
     }
   }
 
@@ -49,31 +70,28 @@
         event.stopImmediatePropagation();
 
         const sb = getClient();
-        if (!sb) {
-          status("系统还在初始化，请稍后再试。", true);
-          return;
-        }
+        if (!sb) return status(T.init, true);
 
         const payload = Object.fromEntries(new FormData(form).entries());
         const email = String(payload.email || "").trim().toLowerCase();
         const password = String(payload.password || "");
         const confirm = String(payload.confirm_password || "");
 
-        if (!email) return status("请输入邮箱", true);
-        if (password.length < 6) return status("密码至少 6 位", true);
-        if (password !== confirm) return status("两次输入的密码不一致", true);
+        if (!email) return status(T.email, true);
+        if (password.length < 6) return status(T.password, true);
+        if (password !== confirm) return status(T.confirm, true);
 
         const { data: allowed, error: allowError } = await sb.rpc("is_registration_invited", {
           candidate_email: email
         });
-        if (allowError) return status(allowError.message || "注册校验失败", true);
-        if (!allowed) return status("该邮箱暂未获得管理员同意，请联系管理员同意后再注册。", true);
+        if (allowError) return status(allowError.message || T.checkFail, true);
+        if (!allowed) return status(T.notAllowed, true);
 
         const { error } = await sb.auth.signUp({ email, password });
-        if (error) return status(error.message || "注册失败", true);
+        if (error) return status(error.message || T.signupFail, true);
 
         form.reset();
-        status("注册成功。请登录；登录后仍需管理员绑定成员，才能进入账本。", false);
+        status(T.signupOk, false);
       },
       true
     );
@@ -87,7 +105,7 @@
       event.preventDefault();
       const sb = getClient();
       if (!sb || typeof state === "undefined" || !state.isAdmin) {
-        if (typeof showMessage === "function") showMessage("只有管理员可以同意注册邮箱", true);
+        if (typeof showMessage === "function") showMessage(T.onlyAdmin, true);
         return;
       }
 
@@ -103,12 +121,12 @@
         { onConflict: "email" }
       );
       if (error) {
-        if (typeof showMessage === "function") showMessage(error.message || "添加失败", true);
+        if (typeof showMessage === "function") showMessage(error.message || T.addFail, true);
         return;
       }
 
       form.reset();
-      if (typeof showMessage === "function") showMessage("已同意该邮箱注册。");
+      if (typeof showMessage === "function") showMessage(T.addOk);
       await loadInvites();
     });
   }
