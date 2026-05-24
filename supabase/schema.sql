@@ -101,6 +101,29 @@ create table if not exists public.settlement_periods (
   check (end_date >= start_date)
 );
 
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'settlement_periods'
+      and column_name = 'start_at'
+  ) then
+    alter table public.settlement_periods alter column start_at drop not null;
+  end if;
+
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'settlement_periods'
+      and column_name = 'end_at'
+  ) then
+    alter table public.settlement_periods alter column end_at drop not null;
+  end if;
+end $$;
+
 drop trigger if exists set_settlement_periods_updated_at on public.settlement_periods;
 create trigger set_settlement_periods_updated_at
 before update on public.settlement_periods
@@ -287,31 +310,52 @@ before insert or update or delete on public.expenses
 for each row
 execute function public.guard_locked_period_expense();
 
-create or replace function public.handle_new_user()
+create schema if not exists private;
+
+create or replace function private.handle_new_auth_user()
 returns trigger
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, auth
 as $$
-declare
-  fallback_name text;
 begin
-  fallback_name := coalesce(new.raw_user_meta_data ->> 'name', split_part(new.email, '@', 1), 'member');
-
   insert into public.profiles (id, display_name, role, email)
-  values (new.id, fallback_name, 'member', new.email)
+  values (
+    new.id,
+    coalesce(nullif(new.raw_user_meta_data->>'display_name', ''), split_part(new.email, '@', 1), 'member'),
+    'member',
+    new.email
+  )
   on conflict (id) do update
-  set email = excluded.email;
+  set email = coalesce(excluded.email, public.profiles.email),
+      display_name = coalesce(nullif(public.profiles.display_name, ''), excluded.display_name),
+      updated_at = now();
 
   return new;
 end;
 $$;
 
 drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
+drop trigger if exists on_auth_user_created_create_profile on auth.users;
+drop function if exists public.handle_new_user();
+
+create trigger on_auth_user_created_create_profile
 after insert on auth.users
 for each row
-execute function public.handle_new_user();
+execute function private.handle_new_auth_user();
+
+insert into public.profiles (id, email, display_name, role)
+select
+  u.id,
+  u.email,
+  coalesce(nullif(u.raw_user_meta_data->>'display_name', ''), split_part(u.email, '@', 1), 'member'),
+  'member'
+from auth.users u
+where u.email is not null
+on conflict (id) do update
+set email = coalesce(excluded.email, public.profiles.email),
+    display_name = coalesce(nullif(public.profiles.display_name, ''), excluded.display_name),
+    updated_at = now();
 
 -- backfill: create default member + binding for accounts without mapping
 DO $$
@@ -377,6 +421,16 @@ alter table public.member_hashrates enable row level security;
 alter table public.settlement_periods enable row level security;
 alter table public.capital_entries enable row level security;
 alter table public.expenses enable row level security;
+
+grant usage on schema public to authenticated;
+
+grant select, insert, update, delete on table public.profiles to authenticated;
+grant select, insert, update, delete on table public.members to authenticated;
+grant select, insert, update, delete on table public.account_member_bindings to authenticated;
+grant select, insert, update, delete on table public.member_hashrates to authenticated;
+grant select, insert, update, delete on table public.settlement_periods to authenticated;
+grant select, insert, update, delete on table public.capital_entries to authenticated;
+grant select, insert, update, delete on table public.expenses to authenticated;
 
 -- profiles
 drop policy if exists "profiles_select_authenticated" on public.profiles;

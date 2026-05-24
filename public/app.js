@@ -899,6 +899,8 @@ async function onPeriodSubmit(event) {
         title: String(payload.title || "").trim(),
         start_date: payload.start_date,
         end_date: payload.end_date,
+        start_at: `${payload.start_date}T00:00:00+08:00`,
+        end_at: `${payload.end_date}T23:59:59+08:00`,
         created_by: state.user.id,
         status: "open"
       })
