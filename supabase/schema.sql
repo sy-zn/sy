@@ -1,4 +1,4 @@
-﻿-- Shared ledger schema V2 (member-centric + account binding)
+-- Shared ledger schema V2 (member-centric + account binding)
 -- Run in Supabase SQL Editor
 
 create extension if not exists pgcrypto;
@@ -177,6 +177,29 @@ create table if not exists public.expenses (
 );
 
 alter table public.expenses add column if not exists member_id uuid;
+
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'expenses'
+      and column_name = 'original_amount'
+  ) then
+    alter table public.expenses alter column original_amount drop not null;
+  end if;
+
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'expenses'
+      and column_name = 'settlement_amount'
+  ) then
+    alter table public.expenses alter column settlement_amount drop not null;
+  end if;
+end $$;
 
 do $$
 begin
@@ -591,6 +614,11 @@ for delete to authenticated
 using (owner_id = auth.uid());
 
 -- expenses
+drop policy if exists "expenses_delete_own_unlocked_or_admin" on public.expenses;
+drop policy if exists "expenses_insert_own_unlocked" on public.expenses;
+drop policy if exists "expenses_select_related_or_admin" on public.expenses;
+drop policy if exists "expenses_update_own_unlocked_or_admin" on public.expenses;
+
 drop policy if exists "expenses_select_authenticated" on public.expenses;
 create policy "expenses_select_authenticated"
 on public.expenses
