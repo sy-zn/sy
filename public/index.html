@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
@@ -21,6 +21,8 @@
     </header>
 
     <main class="layout">
+      <div id="message" class="message" hidden></div>
+
       <section id="auth-panel" class="panel auth-panel">
         <h2>登录</h2>
         <p class="hint">使用 Supabase Auth 邮箱账号登录。没有账号可先自助注册，注册后由管理员绑定成员。</p>
@@ -54,9 +56,19 @@
         </form>
       </section>
 
-      <section id="app-panel" class="panel" hidden>
-        <div id="message" class="message" hidden></div>
+      <section id="waiting-panel" class="panel waiting-panel" hidden>
+        <div class="waiting-card">
+          <p class="kicker">Access Pending</p>
+          <h2>账号已注册，等待管理员授权</h2>
+          <p>
+            当前邮箱 <strong id="waiting-email">-</strong> 还没有绑定到任何成员。
+            绑定前不能查看账本数据，也不能提交入金、支出或凭证。
+          </p>
+          <p class="hint">请把注册邮箱发给管理员，由管理员在“成员与账号管理”里绑定对应成员。</p>
+        </div>
+      </section>
 
+      <section id="app-panel" class="panel" hidden>
         <div class="summary-cards" id="summary-cards"></div>
 
         <article id="admin-panel" class="subpanel" hidden>
