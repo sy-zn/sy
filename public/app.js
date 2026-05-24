@@ -1,4 +1,4 @@
-﻿const RECEIPT_BUCKET = "receipts";
+const RECEIPT_BUCKET = "receipts";
 const TEAM_RESERVE_FLOOR = 5000;
 const DEFAULT_SUPABASE_URL = "https://ilhqabnqigtmjftpywxk.supabase.co";
 const DEFAULT_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_OOJBj2Ag_h4LvKa2e03K3Q_SrcFr1jV";
@@ -8,6 +8,7 @@ const state = {
   user: null,
   profile: null,
   isAdmin: false,
+  isAuthorized: false,
   selectedPeriodId: null,
   data: {
     profiles: [],
@@ -22,9 +23,11 @@ const state = {
 
 const refs = {
   authPanel: document.getElementById("auth-panel"),
+  waitingPanel: document.getElementById("waiting-panel"),
   appPanel: document.getElementById("app-panel"),
   adminPanel: document.getElementById("admin-panel"),
   message: document.getElementById("message"),
+  waitingEmail: document.getElementById("waiting-email"),
   loginForm: document.getElementById("login-form"),
   registerForm: document.getElementById("register-form"),
   logoutBtn: document.getElementById("logout-btn"),
@@ -148,6 +151,22 @@ function getBindingMap() {
       }
     });
   return map;
+}
+
+async function isCurrentUserBound() {
+  if (!state.user) {
+    return false;
+  }
+  const { data, error } = await state.supabase
+    .from("account_member_bindings")
+    .select("id")
+    .eq("profile_id", state.user.id)
+    .eq("is_active", true)
+    .limit(1);
+  if (error) {
+    throw error;
+  }
+  return (data || []).length > 0;
 }
 
 function getAccessibleMembersForCurrentUser() {
@@ -281,15 +300,6 @@ async function initProfileForUser() {
     const { error: insertError } = await sb.from("profiles").insert(baseProfile);
     if (insertError) {
       throw insertError;
-    }
-  } else if (user.email) {
-    const { error: patchEmailError } = await sb
-      .from("profiles")
-      .update({ email: user.email })
-      .eq("id", user.id)
-      .is("email", null);
-    if (patchEmailError) {
-      throw patchEmailError;
     }
   }
 
@@ -532,13 +542,22 @@ function renderAdminPanel() {
     .join("");
 
   const currentBindingMap = getBindingMap();
+  const profiles = state.data.profiles.slice().sort((a, b) => {
+    const aBound = currentBindingMap.has(a.id) ? 1 : 0;
+    const bBound = currentBindingMap.has(b.id) ? 1 : 0;
+    if (aBound !== bBound) {
+      return aBound - bBound;
+    }
+    return profileLabel(a).localeCompare(profileLabel(b), "zh-Hans-CN");
+  });
 
-  refs.accountBindingRows.innerHTML = state.data.profiles
+  refs.accountBindingRows.innerHTML = profiles
     .map((profile) => {
       const boundMemberId = currentBindingMap.get(profile.id) || "";
+      const status = boundMemberId ? "已授权" : "待绑定";
       return `
       <tr>
-        <td>${safe(profileLabel(profile))}</td>
+        <td>${safe(profileLabel(profile))}<br><span class="muted">${safe(status)}</span></td>
         <td>
           <select class="binding-select" data-profile-id="${profile.id}">
             ${memberOptions}
@@ -813,8 +832,17 @@ async function refreshCurrentRole() {
 }
 
 async function refreshAll(successMessage) {
-  await loadData();
   await refreshCurrentRole();
+  state.isAuthorized = state.isAdmin || (await isCurrentUserBound());
+  setAuthedUI(true, state.isAuthorized);
+  if (!state.isAuthorized) {
+    renderWaitingPanel();
+    if (successMessage) {
+      showMessage(successMessage);
+    }
+    return;
+  }
+  await loadData();
   renderAll();
   if (successMessage) {
     showMessage(successMessage);
@@ -1054,12 +1082,26 @@ async function onLogout() {
   await state.supabase.auth.signOut();
 }
 
-function setAuthedUI(isAuthed) {
+function renderWaitingPanel() {
+  if (refs.waitingEmail) {
+    refs.waitingEmail.textContent = state.profile?.email || state.user?.email || "-";
+  }
+  const userText = state.profile?.email || state.user?.email || "当前用户";
+  refs.userLabel.textContent = `${userText} (待授权)`;
+}
+
+function setAuthedUI(isAuthed, isAuthorized = false) {
   refs.authPanel.hidden = isAuthed;
-  refs.appPanel.hidden = !isAuthed;
+  if (refs.waitingPanel) {
+    refs.waitingPanel.hidden = !isAuthed || isAuthorized;
+  }
+  refs.appPanel.hidden = !isAuthed || !isAuthorized;
   refs.logoutBtn.hidden = !isAuthed;
   if (!isAuthed) {
     refs.userLabel.textContent = "未登录";
+    if (refs.waitingEmail) {
+      refs.waitingEmail.textContent = "-";
+    }
   }
 }
 
@@ -1068,12 +1110,12 @@ async function handleSession(session) {
     state.user = null;
     state.profile = null;
     state.isAdmin = false;
+    state.isAuthorized = false;
     setAuthedUI(false);
     return;
   }
 
   state.user = session.user;
-  setAuthedUI(true);
 
   try {
     await initProfileForUser();
